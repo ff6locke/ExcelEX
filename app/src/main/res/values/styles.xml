@@ -1,0 +1,4 @@
+<resources><style name="Theme.ExcelEX" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <item name="colorPrimary">#087C3E</item><item name="colorPrimaryVariant">#075B30</item><item name="colorSecondary">#20B86A</item>
+    <item name="android:statusBarColor">#075B30</item><item name="android:navigationBarColor">#075B30</item>
+</style></resources>
