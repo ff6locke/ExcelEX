@@ -2,6 +2,7 @@ package com.ff6locke.excelex
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
@@ -216,10 +217,13 @@ class MainActivity : AppCompatActivity() {
                     setPadding(12, 14, 12, 14)
                     minWidth = 110
                     setTextColor(0xFF17251C.toInt())
-                    setBackgroundColor(
-                        if (rowIndex == 0) 0xFFE2F2E8.toInt()
-                        else if (rowIndex % 2 == 0) -1 else 0xFFF8FBF9.toInt()
-                    )
+                    background = GradientDrawable().apply {
+                        setColor(
+                            if (rowIndex == 0) 0xFFE2F2E8.toInt()
+                            else if (rowIndex % 2 == 0) -1 else 0xFFF8FBF9.toInt()
+                        )
+                        setStroke(dp(1), 0xFFD2DAD5.toInt())
+                    }
                     setOnClickListener { editCell(rowIndex, columnIndex) }
                 }
                 tableRow.addView(cell, TableRow.LayoutParams(110, -2))
@@ -227,6 +231,8 @@ class MainActivity : AppCompatActivity() {
             sheet.addView(tableRow)
         }
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt().coerceAtLeast(1)
 
     private fun editCell(rowIndex: Int, columnIndex: Int) {
         while (rows.size <= rowIndex) rows.add(mutableListOf())
