@@ -16,7 +16,7 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
     private lateinit var sheet: TableLayout
     private lateinit var status: TextView
-    private var rows = mutableListOf(mutableListOf(""))
+    private var rows = MutableList(20) { MutableList(8) { "" } }
     private var fileName = "Workbook.xlsx"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,7 +58,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(bar)
 
         status = TextView(this).apply {
-            text = "Open an Excel workbook or tap a cell to start"
+            text = "Open a workbook, then tap any cell. 20 blank rows are ready to edit."
             setPadding(12, 10, 12, 10)
             textSize = 13f
         }
@@ -70,14 +70,25 @@ class MainActivity : AppCompatActivity() {
         vertical.addView(sheet)
         horizontal.addView(vertical)
         root.addView(horizontal, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(Button(this).apply {
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.addView(Button(this).apply {
             text = "+ Add row"
             setOnClickListener {
-                val columnCount = (rows.firstOrNull()?.size ?: 4).coerceAtLeast(1)
+                val columnCount = (rows.maxOfOrNull { it.size } ?: 8).coerceAtLeast(1)
                 rows.add(MutableList(columnCount) { "" })
                 render()
+                status.text = "${rows.size} rows • New row added"
             }
-        })
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        actions.addView(Button(this).apply {
+            text = "+ Add column"
+            setOnClickListener {
+                rows.forEach { it.add("") }
+                render()
+                status.text = "${rows.size} rows • ${rows.maxOfOrNull { it.size } ?: 0} columns"
+            }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(actions)
         setContentView(root)
         render()
     }
@@ -157,7 +168,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             if (rows.isEmpty()) rows.add(mutableListOf(""))
-            status.text = "$fileName • ${rows.size} rows"
+            val width = (rows.maxOfOrNull { it.size } ?: 1).coerceAtLeast(8)
+            rows.forEach { row -> while (row.size < width) row.add("") }
+            repeat(20) { rows.add(MutableList(width) { "" }) }
+            status.text = "$fileName • ${rows.size - 20} data rows • 20 blank rows ready"
             render()
         } catch (e: Exception) {
             Toast.makeText(this, "Open failed: ${e.message}", Toast.LENGTH_LONG).show()
