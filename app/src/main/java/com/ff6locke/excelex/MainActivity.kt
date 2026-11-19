@@ -1,7 +1,11 @@
 package com.ff6locke.excelex
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
@@ -17,8 +21,13 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
     private lateinit var sheet: TableLayout
     private lateinit var status: TextView
+    private lateinit var verticalScroll: ScrollView
     private var rows = MutableList(20) { MutableList(8) { "" } }
     private var fileName = "Workbook.xlsx"
+    private var selectedCell: Pair<Int, Int>? = null
+    private var searchMatches = mutableListOf<Pair<Int, Int>>()
+    private var searchIndex = -1
+    private var highlightedCell: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,34 +68,69 @@ class MainActivity : AppCompatActivity() {
         root.addView(bar)
 
         status = TextView(this).apply {
-            text = "Open a workbook, then tap any cell. 20 blank rows are ready to edit."
+            text = "Open a workbook, then tap a cell. Long-press a cell to select it for copy/paste."
             setPadding(12, 10, 12, 10)
             textSize = 13f
         }
         root.addView(status)
 
+        val searchBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(8, 2, 8, 6)
+        }
+        val searchInput = EditText(this).apply {
+            hint = "Search in workbook"
+            singleLine = true
+            textSize = 15f
+            setPadding(10, 6, 10, 6)
+        }
+        searchBar.addView(searchInput, LinearLayout.LayoutParams(0, dp(48), 1f))
+        searchBar.addView(Button(this).apply {
+            text = "Find"
+            setOnClickListener {
+                searchMatches.clear()
+                searchIndex = -1
+                findNext(searchInput.text.toString())
+            }
+        })
+        searchBar.addView(Button(this).apply {
+            text = "Next"
+            setOnClickListener { findNext(searchInput.text.toString()) }
+        })
+        root.addView(searchBar)
+
         sheet = TableLayout(this)
         val horizontal = HorizontalScrollView(this)
-        val vertical = ScrollView(this)
-        vertical.addView(sheet)
-        horizontal.addView(vertical)
+        verticalScroll = ScrollView(this)
+        verticalScroll.addView(sheet)
+        horizontal.addView(verticalScroll)
         root.addView(horizontal, LinearLayout.LayoutParams(-1, 0, 1f))
+
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         actions.addView(Button(this).apply {
-            text = "+ Add row"
+            text = "Copy"
+            setOnClickListener { copySelectedCell() }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        actions.addView(Button(this).apply {
+            text = "Paste"
+            setOnClickListener { pasteIntoSelectedCell() }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        actions.addView(Button(this).apply {
+            text = "+ Row"
             setOnClickListener {
                 val columnCount = (rows.maxOfOrNull { it.size } ?: 8).coerceAtLeast(1)
                 rows.add(MutableList(columnCount) { "" })
                 render()
-                status.text = "${rows.size} rows • New row added"
+                status.text = rows.size.toString() + " rows • New row added"
             }
         }, LinearLayout.LayoutParams(0, -2, 1f))
         actions.addView(Button(this).apply {
-            text = "+ Add column"
+            text = "+ Col"
             setOnClickListener {
                 rows.forEach { it.add("") }
                 render()
-                status.text = "${rows.size} rows • ${rows.maxOfOrNull { it.size } ?: 0} columns"
+                status.text = rows.size.toString() + " rows • " + (rows.maxOfOrNull { it.size } ?: 0) + " columns"
             }
         }, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(actions)
@@ -172,10 +216,12 @@ class MainActivity : AppCompatActivity() {
             val width = (rows.maxOfOrNull { it.size } ?: 1).coerceAtLeast(8)
             rows.forEach { row -> while (row.size < width) row.add("") }
             repeat(20) { rows.add(MutableList(width) { "" }) }
-            status.text = "$fileName • ${rows.size - 20} data rows • 20 blank rows ready"
+            selectedCell = null
+            searchMatches.clear()
+            status.text = fileName + " • " + (rows.size - 20) + " data rows • 20 blank rows ready"
             render()
         } catch (e: Exception) {
-            Toast.makeText(this, "Open failed: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Open failed: " + e.message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -206,6 +252,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun render() {
         sheet.removeAllViews()
+        highlightedCell = null
         val columnCount = (rows.maxOfOrNull { it.size } ?: 1).coerceIn(1, 20)
         rows.forEachIndexed { rowIndex, values ->
             val tableRow = TableRow(this)
@@ -215,21 +262,123 @@ class MainActivity : AppCompatActivity() {
                     textSize = 14f
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(12, 14, 12, 14)
-                    minWidth = 110
+                    minWidth = dp(110)
                     setTextColor(0xFF17251C.toInt())
-                    background = GradientDrawable().apply {
-                        setColor(
-                            if (rowIndex == 0) 0xFFE2F2E8.toInt()
-                            else if (rowIndex % 2 == 0) -1 else 0xFFF8FBF9.toInt()
-                        )
-                        setStroke(dp(1), 0xFFD2DAD5.toInt())
+                    background = cellBackground(rowIndex, false)
+                    setOnClickListener {
+                        selectedCell = rowIndex to columnIndex
+                        editCell(rowIndex, columnIndex)
                     }
-                    setOnClickListener { editCell(rowIndex, columnIndex) }
+                    setOnLongClickListener {
+                        selectedCell = rowIndex to columnIndex
+                        status.text = "Selected " + cellAddress(rowIndex, columnIndex) + " • Use Copy or Paste"
+                        Toast.makeText(this@MainActivity, "Cell " + cellAddress(rowIndex, columnIndex) + " selected", Toast.LENGTH_SHORT).show()
+                        true
+                    }
                 }
-                tableRow.addView(cell, TableRow.LayoutParams(110, -2))
+                tableRow.addView(cell, TableRow.LayoutParams(dp(110), -2))
             }
             sheet.addView(tableRow)
         }
+    }
+
+    private fun cellBackground(rowIndex: Int, highlighted: Boolean): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(
+                if (highlighted) 0xFFFFF2A8.toInt()
+                else if (rowIndex == 0) 0xFFE2F2E8.toInt()
+                else if (rowIndex % 2 == 0) Color.WHITE else 0xFFF8FBF9.toInt()
+            )
+            setStroke(dp(if (highlighted) 2 else 1), if (highlighted) 0xFF168447.toInt() else 0xFFD2DAD5.toInt())
+        }
+
+    private fun findNext(query: String) {
+        val term = query.trim()
+        if (term.isEmpty()) {
+            Toast.makeText(this, "Enter text to search", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (searchMatches.isEmpty()) {
+            rows.forEachIndexed { r, row ->
+                row.forEachIndexed { c, value ->
+                    if (value.contains(term, ignoreCase = true)) searchMatches.add(r to c)
+                }
+            }
+        }
+        if (searchMatches.isEmpty()) {
+            status.text = "No matches for \"" + term + "\""
+            Toast.makeText(this, "No matches found", Toast.LENGTH_SHORT).show()
+            return
+        }
+        searchIndex = (searchIndex + 1) % searchMatches.size
+        val match = searchMatches[searchIndex]
+        selectedCell = match
+        val cell = sheet.getChildAt(match.first)?.let { it as? TableRow }?.getChildAt(match.second) as? TextView
+        cell?.let {
+            highlightedCell?.let { previous ->
+                val previousRow = previous.parent as? TableRow
+                val rowIndex = if (previousRow != null) sheet.indexOfChild(previousRow) else 0
+                previous.background = cellBackground(rowIndex.coerceAtLeast(0), false)
+            }
+            it.background = cellBackground(match.first, true)
+            highlightedCell = it
+            it.post {
+                val row = it.parent as? TableRow
+                verticalScroll.smoothScrollTo(0, row?.top ?: it.top)
+            }
+        }
+        status.text = "Found " + (searchIndex + 1) + " of " + searchMatches.size + " • Cell " + cellAddress(match.first, match.second)
+    }
+
+    private fun copySelectedCell() {
+        val position = selectedCell
+        if (position == null) {
+            Toast.makeText(this, "Tap or long-press a cell first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val value = rows.getOrNull(position.first)?.getOrNull(position.second).orEmpty()
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("ExcelEX cell", value))
+        Toast.makeText(this, "Copied " + cellAddress(position.first, position.second), Toast.LENGTH_SHORT).show()
+    }
+
+    private fun pasteIntoSelectedCell() {
+        val position = selectedCell
+        if (position == null) {
+            Toast.makeText(this, "Tap or long-press a cell first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip
+        if (clip == null || clip.itemCount == 0) {
+            Toast.makeText(this, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val pastedText = clip.getItemAt(0).coerceToText(this)?.toString() ?: ""
+        val pasteRows = pastedText.replace("\r\n", "\n").replace('\r', '\n').split('\n')
+        pasteRows.forEachIndexed { rowOffset, line ->
+            val values = line.split('\t')
+            val targetRow = position.first + rowOffset
+            while (rows.size <= targetRow) rows.add(MutableList((rows.maxOfOrNull { it.size } ?: 8).coerceAtLeast(8)) { "" })
+            values.forEachIndexed { columnOffset, value ->
+                val targetColumn = position.second + columnOffset
+                while (rows[targetRow].size <= targetColumn) rows[targetRow].add("")
+                rows[targetRow][targetColumn] = value
+            }
+        }
+        render()
+        status.text = "Pasted into " + cellAddress(position.first, position.second)
+    }
+
+    private fun cellAddress(row: Int, column: Int): String {
+        var number = column + 1
+        var letters = ""
+        while (number > 0) {
+            val remainder = (number - 1) % 26
+            letters = ('A' + remainder) + letters
+            number = (number - 1) / 26
+        }
+        return letters + (row + 1)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt().coerceAtLeast(1)
@@ -240,11 +389,20 @@ class MainActivity : AppCompatActivity() {
         val input = EditText(this).apply {
             setText(rows[rowIndex][columnIndex])
             hint = "Cell value"
+            setSingleLine(false)
         }
         android.app.AlertDialog.Builder(this)
-            .setTitle("Edit cell")
+            .setTitle("Edit " + cellAddress(rowIndex, columnIndex))
             .setView(input)
             .setNegativeButton("Cancel", null)
+            .setNeutralButton("Paste") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    rows[rowIndex][columnIndex] = clip.getItemAt(0).coerceToText(this)?.toString().orEmpty()
+                    render()
+                }
+            }
             .setPositiveButton("Apply") { _, _ ->
                 rows[rowIndex][columnIndex] = input.text.toString()
                 render()
@@ -269,7 +427,7 @@ class MainActivity : AppCompatActivity() {
             }
             Toast.makeText(this, "Workbook saved", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Save failed: " + e.message, Toast.LENGTH_LONG).show()
         }
     }
 }
