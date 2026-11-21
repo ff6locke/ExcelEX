@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity() {
         }
         val searchInput = EditText(this).apply {
             hint = "Search in workbook"
-            singleLine = true
+            setSingleLine(true)
             textSize = 15f
             setPadding(10, 6, 10, 6)
         }
